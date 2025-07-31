@@ -1,0 +1,35 @@
+{
+  "rpi_cpe_1": {
+    "devices": [
+      {
+        "name": "board",
+        "type": "rpi_cpe",
+        "connection_type": "ser2net",
+        "ip_addr": "192.168.2.120",
+        "port": "6031",
+        "shell_prompt": "root@RaspberryPi-Gateway",
+        "model": "RaspberryPi-Gateway",
+        "hostname": "RaspberryPi-Gateway"
+      }
+    ]
+  },
+  "rdk_cpe_1": {
+    "devices": [
+      {
+        "name": "board",
+        "type": "rdk_cpe",
+        "connection_type": "ser2net",
+        "ip_addr": "192.168.2.120",
+        "port": "6031",
+        "shell_prompt": "root@RaspberryPi-Gateway",
+        "model": "RaspberryPi-Gateway",
+        "hostname": "RaspberryPi-Gateway",
+        "wan_interface": "erouter0",
+        "lan_interface": "br0",
+        "eRouter_Provisioning_mode": "ipv4",
+        "gui_password": "password",
+        "oui": "001122"
+      }
+    ]
+  }
+}
