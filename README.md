@@ -25,9 +25,11 @@ A getting started guide for pytest-boardfarm integration, demonstrating foundati
 - **Advanced RdkCpeDevice**: data model access support, networking features
 - Pytest-boardfarm integration with device manager
 - Automatic device registration via boardfarm hooks
-- **ser2net connection method**: Requires a ser2net setup to your Raspberry Pi for device communication
-  - Test your connection before running tests: `telnet <ip> <port>` (e.g., `telnet 192.168.2.120 6031`)
-  - **Important**: Exit telnet with `Ctrl+]` then type `quit` before running pytest tests (only one connection allowed)
+- **Connection Methods**:
+  - **ser2net**: Physical Raspberry Pi via serial-to-network proxy
+  - **LXD**: Containerized testing via LXD REST API
+- Test your connection: `telnet <ip> <port>` (e.g., `telnet 192.168.2.120 6031`)
+- **Important**: Exit telnet with `Ctrl+]` then type `quit` before running pytest tests
 
 ## Quick Start
 
@@ -44,7 +46,8 @@ pip install git+https://github.com/lgirdk/pytest-boardfarm.git@boardfarm3
 # Update `inventory.json` with your device details:
 {
     "rpi_cpe_1": {"devices": [{"name": "board", "type": "rpi_cpe", "ip_addr": "192.168.2.120", "port": "6031"}]},
-    "rdk_cpe_1": {"devices": [{"name": "board", "type": "rdk_cpe", "ip_addr": "192.168.2.120", "port": "6031", "wan_interface": "erouter0"}]}
+    "rdk_cpe_1": {"devices": [{"name": "board", "type": "rdk_cpe", "ip_addr": "192.168.2.120", "port": "6031", "wan_interface": "erouter0"}]},
+    "rdk_cpe_lxd": {"devices": [{"name": "board", "type": "rdk_cpe", "connection_type": "lxd", "lxd_endpoint": "https://192.168.2.120:8443", "container_name": "vcpe"}]}
 }
 ```
 
@@ -52,7 +55,8 @@ pip install git+https://github.com/lgirdk/pytest-boardfarm.git@boardfarm3
 # Run tests
 pytest -p no:pytest_boardfarm3 tests/tests_basic.py -v  # Basic tests
 pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rpi_cpe.py -v  # Simple RPI
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v  # Advanced RDK
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v  # Advanced RDK (physical)
+pytest --board-name=rdk_cpe_lxd --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v  # Advanced RDK (container)
 ./run_all_tests.sh  # All tests
 ```
 
@@ -165,3 +169,58 @@ pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=in
 - Hardware/Software separation (RdkRpiHW and RdkSW classes)
 - Data model access
 - Advanced networking features
+
+## LXD Container Testing
+
+Test the same device classes using LXD containers instead of physical hardware.
+
+### Setup
+
+1. **Generate certificates**:
+```bash
+openssl req -newkey rsa:2048 -nodes -keyout .config/lxc/client.key \
+  -x509 -days 365 -out .config/lxc/client.crt \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=lxd-client"
+```
+
+2. **Configure LXD server** (192.168.2.120):
+```bash
+# Add client certificate
+cat .config/lxc/client.crt | ssh user@192.168.2.120 'lxc config trust add -'
+
+# Enable network listening
+ssh user@192.168.2.120 'lxc config set core.https_address :8443'
+
+# Create/verify container
+ssh user@192.168.2.120 'lxc launch ubuntu:22.04 vcpe'
+```
+
+### Usage
+
+```bash
+# Physical hardware
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
+
+# LXD container (same tests)
+pytest --board-name=rdk_cpe_lxd --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
+```
+
+### LXD Configuration
+
+Add to `inventory.json`:
+```json
+{
+  "rdk_cpe_lxd": {
+    "devices": [{
+      "name": "board",
+      "type": "rdk_cpe",
+      "connection_type": "lxd",
+      "lxd_endpoint": "https://192.168.2.120:8443",
+      "cert_file": ".config/lxc/client.crt",
+      "key_file": ".config/lxc/client.key",
+      "container_name": "vcpe",
+      "serial": "1000000007b59242"
+    }]
+  }
+}
+```

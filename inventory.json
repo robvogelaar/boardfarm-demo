@@ -31,5 +31,43 @@
         "oui": "001122"
       }
     ]
+  },
+  "rdk_cpe_lxd": {
+    "devices": [
+      {
+        "name": "board",
+        "type": "rdk_cpe",
+        "connection_type": "lxd",
+        "lxd_endpoint": "https://192.168.2.120:8443",
+        "cert_file": ".config/lxc/client.crt",
+        "key_file": ".config/lxc/client.key",
+        "container_name": "vcpe",
+        "shell_prompt": "root@RaspberryPi-Gateway",
+        "model": "RaspberryPi-Gateway",
+        "hostname": "RaspberryPi-Gateway",
+        "serial": "1000000007b59242",
+        "wan_interface": "erouter0",
+        "lan_interface": "br0",
+        "eRouter_Provisioning_mode": "ipv4",
+        "gui_password": "password",
+        "oui": "001122"
+      }
+    ]
+  },
+  "rpi_cpe_lxd": {
+    "devices": [
+      {
+        "name": "board",
+        "type": "rpi_cpe",
+        "connection_type": "lxd",
+        "lxd_endpoint": "https://192.168.2.120:8443",
+        "cert_file": ".config/lxc/client.crt",
+        "key_file": ".config/lxc/client.key",
+        "container_name": "vcpe",
+        "shell_prompt": "root@RaspberryPi-Gateway",
+        "model": "RaspberryPi-Gateway",
+        "hostname": "RaspberryPi-Gateway"
+      }
+    ]
   }
 }

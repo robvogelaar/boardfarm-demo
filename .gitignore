@@ -201,3 +201,5 @@ test_results/
 # Test artifacts
 .pytest_cache/
 test-results/
+
+.config/

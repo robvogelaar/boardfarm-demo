@@ -99,7 +99,8 @@ class RdkRpiHW(CPEHW):
                     "cat /proc/cpuinfo | grep Serial | awk '{print $3}'", 
                     timeout=5
                 )
-                return output.strip()
+                if output and output.strip():
+                    return output.strip()
             except Exception:
                 _LOGGER.warning("Failed to get serial number, using default")
 
@@ -151,6 +152,19 @@ class RdkRpiHW(CPEHW):
                 port=self._config.get("port"),
                 shell_prompt=self._shell_prompt,
                 save_console_logs=self._cmdline_args.save_console_logs,
+            )
+        elif connection_type == "lxd":
+            # LXD connection with specific parameters
+            self._console = connection_factory(
+                connection_type=str(connection_type),
+                connection_name=f"{device_name}.console",
+                lxd_endpoint=self._config.get("lxd_endpoint", "https://127.0.0.1:8443"),
+                container_name=self._config.get("container_name", self._config.get("hostname", "rdk-container")),
+                cert_file=self._config.get("cert_file"),
+                key_file=self._config.get("key_file"),
+                trust_password=self._config.get("trust_password"),
+                save_console_logs=self._cmdline_args.save_console_logs,
+                shell_prompt=self._shell_prompt,
             )
         else:
             # Support for other connection types if needed
