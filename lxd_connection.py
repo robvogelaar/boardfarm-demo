@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 from urllib.parse import urljoin
@@ -12,6 +13,9 @@ import pexpect
 
 from boardfarm3.exceptions import DeviceConnectionError
 from boardfarm3.lib.boardfarm_pexpect import BoardfarmPexpect
+
+# Configure httpx logging to be less verbose
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _CONNECTION_ERROR_THRESHOLD = 2
 _CONNECTION_FAILED_STR: str = "Connection failed to LXD container"

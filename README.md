@@ -102,7 +102,23 @@ pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=in
 pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py::test_rdk_cpe_hardware_info -v
 ```
 
-#### 4. Plugin Verification Tests (tests_plugin_verification.py)
+#### 4. RDK CPE Use Cases Tests (tests_rdk_cpe_use_cases.py)
+Advanced tests demonstrating boardfarm3 use cases for system monitoring, networking, and service validation:
+```bash
+# Run all use cases tests
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py -v
+
+# Run system health monitoring tests
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::test_cpu_usage_monitoring -v
+
+# Run comprehensive health check
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::test_combined_system_health_check -v
+
+# Run real boardfarm3 iperf use case test
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::test_iperf_use_case_real -v
+```
+
+#### 5. Plugin Verification Tests (tests_plugin_verification.py)
 Tests to verify boardfarm plugin registration:
 ```bash
 # Run plugin verification tests
@@ -144,6 +160,9 @@ pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=in
 
 # Run advanced RDK CPE tests  
 pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
+
+# Run RDK CPE use cases tests
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py -v
 
 # Run plugin verification tests
 pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_plugin_verification.py -v
@@ -224,3 +243,14 @@ Add to `inventory.json`:
   }
 }
 ```
+
+## Known Issues and Solutions
+
+### ps Command Format Compatibility
+The RdkCpeDevice class includes overridden `start_traffic_receiver` and `start_traffic_sender` methods that handle different `ps` output formats. This is necessary because:
+- Different container environments (LXD, Docker) may have varying `ps` implementations
+- The boardfarm3 library assumes a specific ps output format that may not match your environment
+- The override dynamically detects the PID column position to ensure compatibility
+
+### HTTP Request Logging
+By default, the httpx library logs all HTTP requests at INFO level. The `lxd_connection.py` module sets this to WARNING level to reduce verbosity. Adjust as needed for debugging.
