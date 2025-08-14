@@ -4,7 +4,7 @@ A getting started guide for pytest-boardfarm integration, demonstrating foundati
 
 ## Introduction
 
-[Boardfarm](https://github.com/lgirdk/boardfarm) is a pytest plugin [pytest-boardfarm](https://github.com/lgirdk/pytest-boardfarm) for automated testing of network devices. **Production environments** include:
+[Boardfarm](https://github.com/lgirdk/boardfarm) is a framework for automated testing of network devices, with [pytest-boardfarm](https://github.com/lgirdk/pytest-boardfarm) serving as its pytest plugin integration. **Production environments** include:
 
 - **Comprehensive Device Support**: OEM-specific implementations, CMTS systems, provisioning servers, test infrastructure
 - **Intelligent Test Orchestration**: Automatic device discovery, dynamic test filtering, adaptive execution based on available inventory
@@ -238,6 +238,180 @@ def test_rdk_cpe_hardware_info(device_manager: DeviceManager):
     mac = board.hw.mac_address
     assert serial and mac
 ```
+
+## DMCLI Library Integration
+
+The RDK CPE device implementation includes integrated DMCLI (data model command line interface) library support for structured TR-181 data model access. This provides a clean, Python-native interface to interact with device parameters instead of parsing raw dmcli command output.
+
+### What is DMCLI?
+
+DMCLI is the data model command line interface for accessing TR-181 data model parameters on RDK devices. The integrated library (`shared/lib/dmcli.py`) provides:
+
+- **Structured Parameter Access**: Get/Set TR-181 parameters with proper type handling
+- **Error Handling**: Comprehensive exception handling with logging
+- **Object Management**: Add/Delete data model objects
+- **Type Safety**: Automatic parameter type detection and conversion
+
+### RdkCpeDevice DMCLI Methods
+
+The `RdkCpeDevice` class includes built-in DMCLI helper methods:
+
+#### Core Methods
+```python
+# Get any TR-181 parameter
+value = board.get_data_model_param("Device.DeviceInfo.SerialNumber")
+
+# Set any TR-181 parameter  
+success = board.set_data_model_param("Device.WiFi.SSID.1.SSID", "MyNetwork", "string")
+
+# Direct DMCLI API access
+dmcli_api = board.get_dmcli_api()  # or board.dmcli
+result = dmcli_api.GPV("Device.DeviceInfo.ModelName")
+```
+
+#### Device Information Methods
+```python
+# Device identification
+serial = board.get_device_serial_number()        # "1000000007b59242"
+model = board.get_device_model_name()            # "RaspberryPi"
+version = board.get_device_software_version()    # "4.4.0-someversion"
+uptime = board.get_device_uptime()               # 3600 (seconds)
+```
+
+#### WiFi Management Methods
+```python
+# WiFi status and configuration
+wifi_enabled = board.is_wifi_radio_enabled()     # True/False/None
+ssid = board.get_wifi_ssid()                     # "CurrentNetwork"
+success = board.set_wifi_ssid("NewNetwork")      # True/False
+```
+
+### Running DMCLI Integration Tests
+
+The DMCLI integration includes comprehensive test coverage with both unit tests and real device integration tests.
+
+#### Unit Tests (Library Validation)
+```bash
+# Test core DMCLI library functionality with mocked console
+pytest tests/test_dmcli.py -v
+
+# Expected output: 17 tests covering GPV, SPV, AddObject, DelObject operations
+```
+
+#### Integration Tests (Real Device)
+```bash
+# Test DMCLI integration with actual RDK hardware
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/test_rdk_cpe_dmcli_integration.py -v
+
+# Run specific integration tests
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/test_rdk_cpe_dmcli_integration.py::TestRdkCpeDmcliIntegration::test_dmcli_get_device_info -v
+
+# Test device information retrieval
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/test_rdk_cpe_dmcli_integration.py -k "get_device_info or get_software_version or get_uptime" -v
+
+# Test network interface parameters
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/test_rdk_cpe_dmcli_integration.py -k "network_interfaces or wifi_status" -v
+
+# Test parameter setting (non-destructive)
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/test_rdk_cpe_dmcli_integration.py::TestRdkCpeDmcliIntegration::test_dmcli_set_parameter -v
+```
+
+#### Structure Validation Tests
+```bash
+# Verify DMCLI integration structure and method signatures
+pytest tests/test_dmcli_integration_basic.py -v
+```
+
+### Example DMCLI Usage
+
+```python
+def test_dmcli_device_configuration(device_manager: DeviceManager):
+    """Example of using DMCLI methods for device configuration"""
+    devices = device_manager.get_devices_by_type(RdkCpeDevice)
+    board = list(devices.values())[0]
+    
+    # Get device information using helper methods
+    print(f"Device: {board.get_device_model_name()}")
+    print(f"Serial: {board.get_device_serial_number()}")
+    print(f"Software: {board.get_device_software_version()}")
+    print(f"Uptime: {board.get_device_uptime()} seconds")
+    
+    # Check WiFi status
+    if board.is_wifi_radio_enabled():
+        current_ssid = board.get_wifi_ssid()
+        print(f"Current WiFi SSID: {current_ssid}")
+    
+    # Use direct DMCLI API for advanced operations
+    dmcli = board.get_dmcli_api()
+    
+    # Get network interface count
+    eth_count = dmcli.GPV("Device.Ethernet.InterfaceNumberOfEntries")
+    print(f"Ethernet interfaces: {eth_count.rval}")
+    
+    # Get device manufacturer
+    manufacturer = dmcli.GPV("Device.DeviceInfo.Manufacturer")
+    print(f"Manufacturer: {manufacturer.rval}")
+```
+
+### DMCLI Integration Features
+
+1. **Automatic Parameter Type Handling**: Converts string/bool/int types automatically
+2. **Error Resilience**: Graceful handling of missing or read-only parameters  
+3. **Lazy Initialization**: DMCLI API created only when needed
+4. **Console Safety**: Proper handling during device registration phase
+5. **Logging Integration**: Warning logs for failed operations with context
+6. **Production Ready**: Used in existing production RDK software methods
+
+### Advanced DMCLI Usage
+
+For advanced use cases, access the DMCLI API directly:
+
+```python
+# Add/Delete objects
+dmcli = board.get_dmcli_api()
+
+# Add new WiFi AccessPoint
+result = dmcli.AddObject("Device.WiFi.AccessPoint.")
+new_ap_index = result.rval
+print(f"Created AccessPoint {new_ap_index}")
+
+# Configure the new AccessPoint
+ap_path = f"Device.WiFi.AccessPoint.{new_ap_index}."
+dmcli.SPV(f"{ap_path}SSIDReference", "Device.WiFi.SSID.1.", "string")
+
+# Delete when done
+dmcli.DelObject(ap_path)
+```
+
+### TR-181 Parameter Examples
+
+Common TR-181 parameters accessible via DMCLI:
+
+```python
+# Device Information
+"Device.DeviceInfo.SerialNumber"       # Device serial number
+"Device.DeviceInfo.ModelName"          # Device model
+"Device.DeviceInfo.Manufacturer"       # Device manufacturer  
+"Device.DeviceInfo.SoftwareVersion"    # Software version
+"Device.DeviceInfo.UpTime"             # Device uptime in seconds
+
+# Network Interfaces
+"Device.Ethernet.InterfaceNumberOfEntries"         # Number of Ethernet interfaces
+"Device.Ethernet.Interface.1.Status"               # WAN interface status
+"Device.IP.Interface.1.IPv4Address.1.IPAddress"    # WAN IP address
+
+# WiFi Configuration
+"Device.WiFi.Radio.1.Enable"                       # WiFi radio enabled
+"Device.WiFi.SSID.1.SSID"                         # WiFi network name
+"Device.WiFi.SSID.1.Enable"                       # SSID enabled
+"Device.WiFi.AccessPoint.1.AssociatedDeviceNumberOfEntries"  # Connected clients
+
+# Management
+"Device.ManagementServer.URL"          # TR-069 ACS URL
+"Device.ManagementServer.EnableCWMP"   # TR-069 enabled
+```
+
+The DMCLI integration enables powerful, structured access to all device configuration and status information through the standardized TR-181 data model.
 
 ## Use Cases - Real-World Testing Scenarios
 

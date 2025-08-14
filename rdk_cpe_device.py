@@ -25,6 +25,7 @@ from boardfarm3.lib.utils import retry
 from boardfarm3.templates.acs import ACS
 from boardfarm3.templates.cpe import CPE, CPEHW
 from boardfarm3.templates.provisioner import Provisioner
+from shared.lib.dmcli import DMCLIAPI, DMCLIError
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -329,53 +330,53 @@ class RdkSW(CPESwLibraries):  # pylint: disable=R0904
 
         # For RDK, we use dmcli to get device parameters
         try:
-            # Get device info using dmcli
-            output = self._console.execute_command("dmcli eRT getv Device.DeviceInfo.SerialNumber", timeout=30)
+            # Use DMCLI library for getting device parameters
+            from shared.lib.dmcli import DMCLIAPI, DMCLIError
+            dmcli = DMCLIAPI(self._console)
 
-            # Parse the parameter format:
-            # Parameter XXXX name: Device.DeviceInfo.Something
-            #                type:     string,    value: SomeValue
-            import re
+            # Define parameters to collect for JSON output
+            device_params = [
+                "Device.DeviceInfo.SerialNumber",
+                "Device.DeviceInfo.ModelName",
+                "Device.DeviceInfo.Manufacturer",
+                "Device.DeviceInfo.SoftwareVersion",
+                "Device.DeviceInfo.HardwareVersion",
+                "Device.DeviceInfo.UpTime",
+                "Device.DeviceInfo.ProductClass",
+            ]
 
-            lines = output.splitlines()
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
+            for param in device_params:
+                try:
+                    result = dmcli.GPV(param)
+                    param_value = result.rval
 
-                # Look for parameter name line
-                param_match = re.search(r'Parameter\s+\d+\s+name:\s+(.+)', line)
-                if param_match:
-                    param_name = param_match.group(1).strip()
+                    # Convert boolean strings to actual booleans
+                    if result.rtype in ("bool", "boolean"):
+                        param_value = param_value.lower() in ('true', '1')
+                    elif result.rtype in ("int", "unsignedInt", "uint32", "uint"):
+                        try:
+                            param_value = int(param_value)
+                        except ValueError:
+                            pass  # Keep as string if conversion fails
+                    elif param_value == '':
+                        param_value = None
 
-                    # Look for the corresponding value line (usually next line)
-                    if i + 1 < len(lines):
-                        value_line = lines[i + 1].strip()
-                        value_match = re.search(r'type:\s+\w+,\s+value:\s*(.*)$', value_line)
-                        if value_match:
-                            param_value = value_match.group(1).strip()
+                    # Use a simplified key name (last part of the parameter path)
+                    key_parts = param.split('.')
+                    if len(key_parts) > 2:
+                        # Use last 2-3 parts for readability
+                        if len(key_parts) >= 3:
+                            simple_key = '.'.join(key_parts[-2:])
+                        else:
+                            simple_key = key_parts[-1]
+                    else:
+                        simple_key = param
 
-                            # Convert boolean strings to actual booleans
-                            if param_value.lower() in ('true', 'false'):
-                                param_value = param_value.lower() == 'true'
-                            elif param_value.isdigit():
-                                param_value = int(param_value)
-                            elif param_value == '':
-                                param_value = None
+                    json[simple_key] = param_value
 
-                            # Use a simplified key name (last part of the parameter path)
-                            key_parts = param_name.split('.')
-                            if len(key_parts) > 2:
-                                # Use last 2-3 parts for readability
-                                if len(key_parts) >= 3:
-                                    simple_key = '.'.join(key_parts[-2:])
-                                else:
-                                    simple_key = key_parts[-1]
-                            else:
-                                simple_key = param_name
-
-                            json[simple_key] = param_value
-
-                i += 1
+                except DMCLIError:
+                    # Skip parameters that are not available
+                    continue
 
         except Exception as e:
             _LOGGER.warning("Failed to get dmcli device info: %s", str(e))
@@ -551,14 +552,18 @@ class RdkSW(CPESwLibraries):  # pylint: disable=R0904
         console = self._get_console("default_shell")
         # RDK might use dmcli for TR-069 configuration
         try:
-            console.execute_command(f'dmcli eRT setv Device.ManagementServer.URL string "{url}"')
-            console.execute_command(f'dmcli eRT setv Device.ManagementServer.Username string "{username}"')
+            # Use DMCLI library for TR-069 configuration
+            from shared.lib.dmcli import DMCLIAPI, DMCLIError
+            dmcli = DMCLIAPI(console)
+
+            dmcli.SPV("Device.ManagementServer.URL", url, "string")
+            dmcli.SPV("Device.ManagementServer.Username", username, "string")
             if password:
-                console.execute_command(f'dmcli eRT setv Device.ManagementServer.Password string "{password}"')
-            console.execute_command('dmcli eRT setv Device.ManagementServer.EnableCWMP bool false')
+                dmcli.SPV("Device.ManagementServer.Password", password, "string")
+            dmcli.SPV("Device.ManagementServer.EnableCWMP", "false", "bool")
             sleep(2)
-            console.execute_command('dmcli eRT setv Device.ManagementServer.EnableCWMP bool true')
-        except Exception:
+            dmcli.SPV("Device.ManagementServer.EnableCWMP", "true", "bool")
+        except (DMCLIError, Exception):
             _LOGGER.warning("Failed to configure management server via dmcli")
 
     def finalize_boot(self) -> bool:
@@ -615,6 +620,9 @@ class RdkCpeDevice(CPE, LinuxDevice):
 
         # Set LinuxDevice console to None initially - it will be set after boot
         self._console: BoardfarmPexpect = None
+
+        # DMCLI API instance - will be initialized after console is available
+        self._dmcli_api: DMCLIAPI | None = None
 
     @property
     def config(self) -> dict:
@@ -740,6 +748,141 @@ class RdkCpeDevice(CPE, LinuxDevice):
 
         # Set LinuxDevice console to enable traffic methods
         self._console = self._hw._console
+
+    def get_dmcli_api(self) -> DMCLIAPI:
+        """Get DMCLI API instance for TR-181 parameter access.
+
+        :return: DMCLI API instance
+        :rtype: DMCLIAPI
+        :raises RuntimeError: if console is not available
+        """
+        if self._dmcli_api is None:
+            if self._console is None:
+                # During device registration, console may not be available yet
+                # This will be initialized properly when console becomes available
+                raise RuntimeError("Device console not available for DMCLI operations")
+            self._dmcli_api = DMCLIAPI(self._console)
+        return self._dmcli_api
+    
+    @property
+    def dmcli(self) -> DMCLIAPI | None:
+        """Convenience property for DMCLI API access.
+        
+        :return: DMCLI API instance or None if console not available
+        :rtype: DMCLIAPI | None
+        """
+        try:
+            return self.get_dmcli_api()
+        except RuntimeError:
+            # Console not available during device registration
+            return None
+
+    def get_data_model_param(self, param: str) -> str | None:
+        """Get TR-181 parameter value using DMCLI library.
+
+        :param param: TR-181 parameter path
+        :type param: str
+        :return: parameter value or None if error
+        :rtype: str | None
+        """
+        try:
+            result = self.get_dmcli_api().GPV(param)
+            return result.rval
+        except DMCLIError as e:
+            _LOGGER.warning("Failed to get %s: %s", param, e)
+            return None
+
+    def set_data_model_param(self, param: str, value: str, param_type: str = "string") -> bool:
+        """Set TR-181 parameter value using DMCLI library.
+
+        :param param: TR-181 parameter path
+        :type param: str
+        :param value: parameter value to set
+        :type value: str
+        :param param_type: parameter type (string, bool, int, etc.)
+        :type param_type: str
+        :return: True if successful, False otherwise
+        :rtype: bool
+        """
+        try:
+            result = self.get_dmcli_api().SPV(param, value, param_type)
+            return "succeed" in result.status
+        except DMCLIError as e:
+            _LOGGER.warning("Failed to set %s=%s: %s", param, value, e)
+            return False
+
+    def get_device_serial_number(self) -> str | None:
+        """Get device serial number using TR-181 data model.
+
+        :return: device serial number or None if not available
+        :rtype: str | None
+        """
+        return self.get_data_model_param("Device.DeviceInfo.SerialNumber")
+
+    def get_device_model_name(self) -> str | None:
+        """Get device model name using TR-181 data model.
+
+        :return: device model name or None if not available
+        :rtype: str | None
+        """
+        return self.get_data_model_param("Device.DeviceInfo.ModelName")
+
+    def get_device_software_version(self) -> str | None:
+        """Get device software version using TR-181 data model.
+
+        :return: software version or None if not available
+        :rtype: str | None
+        """
+        return self.get_data_model_param("Device.DeviceInfo.SoftwareVersion")
+
+    def get_device_uptime(self) -> int | None:
+        """Get device uptime in seconds using TR-181 data model.
+
+        :return: uptime in seconds or None if not available
+        :rtype: int | None
+        """
+        uptime_str = self.get_data_model_param("Device.DeviceInfo.UpTime")
+        if uptime_str:
+            try:
+                return int(uptime_str)
+            except ValueError:
+                _LOGGER.warning("Invalid uptime value: %s", uptime_str)
+        return None
+
+    def is_wifi_radio_enabled(self, radio_index: int = 1) -> bool | None:
+        """Check if WiFi radio is enabled using TR-181 data model.
+
+        :param radio_index: WiFi radio index (default: 1)
+        :type radio_index: int
+        :return: True if enabled, False if disabled, None if not available
+        :rtype: bool | None
+        """
+        enable_str = self.get_data_model_param(f"Device.WiFi.Radio.{radio_index}.Enable")
+        if enable_str:
+            return enable_str.lower() in ("true", "1")
+        return None
+
+    def get_wifi_ssid(self, ssid_index: int = 1) -> str | None:
+        """Get WiFi SSID using TR-181 data model.
+
+        :param ssid_index: SSID index (default: 1)
+        :type ssid_index: int
+        :return: SSID name or None if not available
+        :rtype: str | None
+        """
+        return self.get_data_model_param(f"Device.WiFi.SSID.{ssid_index}.SSID")
+
+    def set_wifi_ssid(self, ssid_name: str, ssid_index: int = 1) -> bool:
+        """Set WiFi SSID using TR-181 data model.
+
+        :param ssid_name: new SSID name
+        :type ssid_name: str
+        :param ssid_index: SSID index (default: 1)
+        :type ssid_index: int
+        :return: True if successful, False otherwise
+        :rtype: bool
+        """
+        return self.set_data_model_param(f"Device.WiFi.SSID.{ssid_index}.SSID", ssid_name, "string")
 
     def get_interactive_consoles(self) -> dict[str, BoardfarmPexpect]:
         """Get interactive consoles of the device.
