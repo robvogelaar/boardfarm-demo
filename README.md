@@ -4,7 +4,7 @@ A getting started guide for pytest-boardfarm integration, demonstrating foundati
 
 ## Introduction
 
-[Boardfarm](https://github.com/lgirdk/boardfarm) is a pytest plugin for automated testing of network devices. **Production environments** include:
+[Boardfarm](https://github.com/lgirdk/boardfarm) is a pytest plugin [pytest-boardfarm](https://github.com/lgirdk/pytest-boardfarm) for automated testing of network devices. **Production environments** include:
 
 - **Comprehensive Device Support**: OEM-specific implementations, CMTS systems, provisioning servers, test infrastructure
 - **Intelligent Test Orchestration**: Automatic device discovery, dynamic test filtering, adaptive execution based on available inventory
@@ -41,45 +41,95 @@ pip install git+https://github.com/lgirdk/boardfarm.git@boardfarm3
 pip install git+https://github.com/lgirdk/pytest-boardfarm.git@boardfarm3
 ```
 
+```bash
+# Run basic test to verify installation
+pytest -p no:pytest_boardfarm3 tests/tests_basic.py -v
+```
+
+### Setting up ser2net
+
+ser2net provides serial-to-network proxy access to physical Raspberry Pi devices. This allows remote access to the device's serial console over TCP/IP.
+
+#### Installation
 
 ```bash
-# Update `inventory.json` with your device details:
+# Install ser2net on the host connected to your Raspberry Pi
+sudo apt-get update
+sudo apt-get install ser2net
+```
+
+#### Configuration
+
+Edit `/etc/ser2net.conf` to add your serial device:
+
+```bash
+# Example configuration for Raspberry Pi serial console
+# Format: port:telnet:timeout:device:options
+6031:telnet:0:/dev/ttyUSB0:115200 8DATABITS NONE 1STOPBIT banner
+```
+
+Key parameters:
+- `6031`: TCP port to listen on (choose any available port)
+- `telnet`: Connection protocol
+- `0`: No timeout (connection stays open)
+- `/dev/ttyUSB0`: Serial device (adjust based on your USB-to-serial adapter)
+- `115200`: Baud rate (standard for Raspberry Pi console)
+
+#### Starting ser2net
+
+```bash
+# Start ser2net service
+sudo systemctl start ser2net
+sudo systemctl enable ser2net  # Enable on boot
+
+# Or run manually for testing
+sudo ser2net -C /etc/ser2net.conf -d
+```
+
+#### Verify Connection
+
+```bash
+# Test connection to your device
+telnet <ser2net_host_ip> 6031
+
+# You should see the Raspberry Pi console
+# Exit with Ctrl+] then type 'quit'
+```
+
+**Important**: Always exit telnet properly before running pytest tests to avoid connection conflicts.
+
+## RPI CPE Device (Simple Implementation)
+
+The `RpiCpeDevice` class provides a basic device implementation for Raspberry Pi boards. This is the simplest way to get started with boardfarm.
+
+### Features
+- Basic command execution via `command(cmd)` method
+- Simple serial console access through ser2net
+- Minimal configuration required
+- Perfect for learning boardfarm fundamentals
+
+### Configuration
+
+Add to `inventory.json`:
+```json
 {
-    "rpi_cpe_1": {"devices": [{"name": "board", "type": "rpi_cpe", "ip_addr": "192.168.2.120", "port": "6031"}]},
-    "rdk_cpe_1": {"devices": [{"name": "board", "type": "rdk_cpe", "ip_addr": "192.168.2.120", "port": "6031", "wan_interface": "erouter0"}]},
-    "rdk_cpe_lxd": {"devices": [{"name": "board", "type": "rdk_cpe", "connection_type": "lxd", "lxd_endpoint": "https://192.168.2.120:8443", "container_name": "vcpe"}]}
+    "rpi_cpe_1": {
+        "devices": [{
+            "name": "board",
+            "type": "rpi_cpe",
+            "connection_type": "ser2net",
+            "ip_addr": "192.168.2.120",
+            "port": "6031",
+            "shell_prompt": "root@RaspberryPi-Gateway"
+        }]
+    }
 }
 ```
 
+### Running RPI CPE Tests
+
 ```bash
-# Run tests
-pytest -p no:pytest_boardfarm3 tests/tests_basic.py -v  # Basic tests
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rpi_cpe.py -v  # Simple RPI
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v  # Advanced RDK (physical)
-pytest --board-name=rdk_cpe_lxd --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v  # Advanced RDK (container)
-./run_all_tests.sh  # All tests
-```
-
-
-## Usage
-
-### Running Tests
-
-The project includes several test files in the `tests/` directory, each serving different purposes:
-
-#### 1. Basic Tests (tests_basic.py)
-Simple pytest examples without boardfarm integration:
-```bash
-# Run basic tests without boardfarm plugin
-pytest -p no:pytest_boardfarm3 tests/tests_basic.py -v
-
-# Example output: Tests basic pytest functionality like fixtures, parametrization, and markers
-```
-
-#### 2. Simple RPI CPE Tests (tests_rpi_cpe.py)
-Tests using boardfarm's device manager to interact with simple RPI CPE devices:
-```bash
-# Run all RPI CPE tests (requires device connection)
+# Run all RPI CPE tests
 pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rpi_cpe.py -v
 
 # Run a specific test
@@ -87,107 +137,210 @@ pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=in
 
 # Skip slow tests
 pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rpi_cpe.py -m "not slow" -v
+
+# Show print statements for debugging
+pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rpi_cpe.py -v -s
 ```
 
-#### 3. Advanced RDK CPE Tests (tests_rdk_cpe.py)
-Comprehensive tests for the advanced RDK CPE implementation:
+### Example Test Code
+
+The RPI CPE tests demonstrate basic device interaction:
+```python
+def test_cpe_connection(device_manager: DeviceManager):
+    """Test connection to CPE device via ser2net"""
+    devices = device_manager.get_devices_by_type(RpiCpeDevice)
+    cpe = list(devices.values())[0]
+    
+    output = cpe.command("uname -a")
+    assert "Linux" in output
+```
+
+
+## RDK CPE Device (Advanced Template Implementation)
+
+The `RdkCpeDevice` class demonstrates the full boardfarm3 CPE template implementation, following production patterns used in real deployments.
+
+### Architecture
+
+The RDK CPE implementation (`rdk_cpe_device.py`) follows boardfarm3's hardware/software separation pattern with three main classes:
+
+- **RdkRpiHW**: Hardware abstraction layer
+  - Serial number retrieval from /proc/cpuinfo
+  - MAC address retrieval from network interfaces
+  - Power cycle/reboot capabilities
+  - Console connection management (ser2net/LXD)
+
+- **RdkSW**: Software abstraction layer
+  - Device information collection via dmcli
+  - Management server configuration (TR-069/CWMP)
+  - Network interface properties (WAN/LAN/Guest)
+  - Software version retrieval
+
+- **RdkCpeDevice**: Main device class
+  - Inherits from boardfarm3's CPETemplate
+  - Combines hardware and software capabilities
+  - Provides unified device interface
+
+### Features
+
+- Device information collection (serial, MAC, version)
+- Network interface management (WAN/erouter0, LAN/br0)
+- System command execution and monitoring
+- Hardware control (reboot/power cycle)
+- Performance monitoring (via Linux commands)
+- Management server configuration (TR-069/CWMP via dmcli)
+- Connection support for ser2net and LXD containers
+
+### Configuration
+
+Add to `inventory.json`:
+```json
+{
+    "rdk_cpe_1": {
+        "devices": [{
+            "name": "board",
+            "type": "rdk_cpe",
+            "connection_type": "ser2net",
+            "ip_addr": "192.168.2.120",
+            "port": "6031",
+            "shell_prompt": "root@RaspberryPi-Gateway",
+            "wan_interface": "erouter0",
+            "lan_interface": "br0"
+        }]
+    }
+}
+```
+
+### Running RDK CPE Tests
+
 ```bash
-# Run all RDK CPE tests (requires device connection)
+# Run all RDK CPE tests
 pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
 
-# Run with timing information to see performance
+# Run with timing information
 pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v --durations=0
 
 # Run a specific test
 pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py::test_rdk_cpe_hardware_info -v
 ```
 
-#### 4. RDK CPE Use Cases Tests (tests_rdk_cpe_use_cases.py)
-Advanced tests demonstrating boardfarm3 use cases for system monitoring, networking, and service validation:
+### Example Test Code
+
+The RDK CPE tests demonstrate advanced device capabilities:
+```python
+def test_rdk_cpe_hardware_info(device_manager: DeviceManager):
+    """Test hardware information retrieval"""
+    devices = device_manager.get_devices_by_type(RdkCpeDevice)
+    board = list(devices.values())[0]
+    
+    # Access hardware properties
+    serial = board.hw.serial_number
+    mac = board.hw.mac_address
+    assert serial and mac
+```
+
+## Use Cases - Real-World Testing Scenarios
+
+The `tests_rdk_cpe_use_cases.py` file demonstrates how boardfarm3 is used in production environments for comprehensive device validation.
+
+### What Are Use Cases?
+
+Use cases represent real-world testing scenarios that validate device functionality in practical situations:
+
+- **System Health Monitoring**: CPU, memory, and resource utilization
+- **Network Performance**: Throughput testing, latency measurements
+- **Service Validation**: Ensuring critical services are running
+- **Configuration Management**: Applying and verifying device settings
+- **Stress Testing**: Device behavior under load
+
+### How Use Cases Work
+
+1. **Comprehensive Health Checks**: Combine multiple validations into single test
+2. **Performance Baselines**: Establish and verify expected performance metrics
+3. **Service Dependencies**: Test inter-service relationships and dependencies
+4. **Real Traffic Patterns**: Simulate actual network usage patterns
+
+### Running Use Case Tests
+
 ```bash
-# Run all use cases tests
+# Run all use case tests
 pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py -v
 
-# Run system health monitoring tests
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::test_cpu_usage_monitoring -v
+# System monitoring tests
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::TestRdkCpeUseCases::test_cpu_usage_monitoring -v
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::TestRdkCpeUseCases::test_memory_usage_monitoring -v
 
-# Run comprehensive health check
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::test_combined_system_health_check -v
+# Network performance tests
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::TestRdkCpeUseCases::test_wan_connectivity_check -v
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::TestRdkCpeUseCases::test_lan_interface_status -v
 
-# Run real boardfarm3 iperf use case test
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::test_iperf_use_case_real -v
+# Comprehensive validation
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::TestRdkCpeUseCases::test_combined_system_health_check -v
+
+# Real boardfarm3 iperf test (requires iperf server)
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py::TestRdkCpeUseCases::test_iperf_use_case_real -v
 ```
 
-#### 5. Plugin Verification Tests (tests_plugin_verification.py)
-Tests to verify boardfarm plugin registration:
+### Example Use Case Test
+
+```python
+def test_combined_system_health_check(self, device_manager: DeviceManager):
+    """Comprehensive system health validation"""
+    board = self._get_board(device_manager)
+    
+    # Check CPU usage
+    cpu_usage = cpe_use_cases.get_cpu_usage(board)
+    assert 0 <= cpu_usage <= 100, f"Invalid CPU usage: {cpu_usage}%"
+    
+    # Check memory usage  
+    mem_usage = cpe_use_cases.get_memory_usage(board)
+    assert 0 <= mem_usage <= 100, f"Invalid memory usage: {mem_usage}%"
+    
+    # Check network connectivity
+    wan_status = networking_use_cases.wan_connectivity_check(board)
+    assert wan_status["connected"], "WAN connectivity failed"
+```
+
+### Production Use Cases
+
+In production boardfarm deployments, use cases extend to:
+
+- **WiFi Client Onboarding**: WPS, manual configuration, band steering
+- **IPTV Streaming**: Multicast joins, channel changes, quality metrics
+- **Firmware Upgrades**: Download, verification, installation, rollback
+- **Security Validation**: Firewall rules, port scans, intrusion detection
+- **QoS Testing**: Traffic prioritization, bandwidth management
+- **Stability Testing**: Long-duration tests, reboot cycles, stress scenarios
+
+## Test Execution Options
+
+### Required Arguments
+
+- `--board-name`: Board configuration name from inventory.json
+- `--env-config`: Path to environment configuration file
+- `--inventory-config`: Path to inventory configuration file
+
+### Useful pytest Options
+
 ```bash
-# Run plugin verification tests
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_plugin_verification.py -v
+# Verbose output with print statements
+pytest --board-name=rdk_cpe_1 ... -v -s
+
+# Run tests matching a pattern
+pytest --board-name=rdk_cpe_1 ... -k "network"
+
+# Run tests with specific markers
+pytest --board-name=rdk_cpe_1 ... -m "not slow"
+
+# Show test durations
+pytest --board-name=rdk_cpe_1 ... --durations=10
+
+# Stop on first failure
+pytest --board-name=rdk_cpe_1 ... -x
+
+# Collect only (don't run)
+pytest --board-name=rdk_cpe_1 ... --collect-only
 ```
-
-### Common Test Options
-
-```bash
-# Run with verbose output and show print statements
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rpi_cpe.py -v -s
-
-# Run only integration tests
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json -m integration -v
-
-# Run all tests except slow ones
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json -m "not slow" -v
-
-# Collect tests without running (useful for debugging)
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json --collect-only
-```
-
-### Running All Tests
-
-You can run all tests using the provided script:
-
-```bash
-./run_all_tests.sh
-```
-
-Or run tests individually:
-
-```bash
-# Run basic tests without boardfarm
-pytest -p no:pytest_boardfarm3 tests/tests_basic.py -v
-
-# Run simple RPI CPE tests
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rpi_cpe.py -v
-
-# Run advanced RDK CPE tests  
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
-
-# Run RDK CPE use cases tests
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe_use_cases.py -v
-
-# Run plugin verification tests
-pytest --board-name=rpi_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_plugin_verification.py -v
-```
-
-### Required Arguments for Boardfarm Tests
-
-- `--board-name`: Name of the board configuration in inventory.json
-- `--env-config`: Path to environment configuration file (env_config.json)
-- `--inventory-config`: Path to inventory configuration file (inventory.json)
-
-### Important Notes
-
-1. **Test Isolation**: Basic tests (`tests_basic.py`) must be run without the boardfarm plugin as they are pure pytest examples without boardfarm integration.
-
-2. **Test Collection**: The boardfarm plugin may interfere with normal pytest test collection when enabled, which is why running `pytest tests/` doesn't work as expected.
-
-## Device Classes
-
-**RpiCpeDevice** (`rpi_cpe_device.py`): Basic command execution via `command(cmd)` method
-
-**RdkCpeDevice** (`rdk_cpe_device.py`): Full boardfarm3 template implementation:
-- Hardware/Software separation (RdkRpiHW and RdkSW classes)
-- Data model access
-- Advanced networking features
 
 ## LXD Container Testing
 
@@ -214,16 +367,6 @@ ssh user@192.168.2.120 'lxc config set core.https_address :8443'
 ssh user@192.168.2.120 'lxc launch ubuntu:22.04 vcpe'
 ```
 
-### Usage
-
-```bash
-# Physical hardware
-pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
-
-# LXD container (same tests)
-pytest --board-name=rdk_cpe_lxd --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
-```
-
 ### LXD Configuration
 
 Add to `inventory.json`:
@@ -243,6 +386,18 @@ Add to `inventory.json`:
   }
 }
 ```
+
+
+### Usage
+
+```bash
+# Physical hardware
+pytest --board-name=rdk_cpe_1 --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
+
+# LXD container (same tests)
+pytest --board-name=rdk_cpe_lxd --env-config=env_config.json --inventory-config=inventory.json tests/tests_rdk_cpe.py -v
+```
+
 
 ## Known Issues and Solutions
 
